@@ -1,0 +1,90 @@
+{
+    "AWSTemplateFormatVersion": "2010-09-09",
+    "Description": "Create EFS Jenkins Maestro)",
+    
+    "Parameters": {
+  
+  
+      "EFSJM": {
+        "Description": "Name de EFS",
+        "Type": "String",
+        "Default": "EFS-JM-ECS"     
+      },
+  
+      "EFSMountTargetSecurityGroup": {
+        "Description": "Jenkins Security Group",
+        "Type": "AWS::EC2::SecurityGroup::Id",
+        "Default": "sg-0e72dbc5a04def592"
+  
+      },
+  
+      "SubnetPublic1": {
+        "Type": "AWS::EC2::Subnet::Id",
+        "Description": "SubnetPublic #1 - must be available in your account and in the same region as SubnetPublic1",
+        "Default": "subnet-11f8cf3f"
+      },
+      
+      "SubnetPublic2": {
+        "Type": "AWS::EC2::Subnet::Id",
+        "Description": "Subnet Public #2 - must be available in your account and in the same region as SubnetPublic2",
+        "Default": "subnet-0a9ee234"
+      }
+      
+    },
+    
+    "Resources": {
+  
+      "EFSFileSystem": {
+        "Type": "AWS::EFS::FileSystem",
+        "Properties": {
+          "FileSystemTags": [
+            {
+              "Key": "Name",
+              "Value": {
+                "Ref": "EFSJM"
+              }
+            }
+          ],
+          "PerformanceMode": "generalPurpose"
+        }
+      },
+  
+      
+      "EFSMountTarget1": {
+        "Type": "AWS::EFS::MountTarget",
+        "Properties": {
+          "FileSystemId": {
+            "Ref": "EFSFileSystem"
+          },
+          "SecurityGroups": [
+            {
+              "Ref": "EFSMountTargetSecurityGroup"
+            }
+          ],
+          "SubnetId": {
+            "Ref": "SubnetPublic1"
+          }
+        }
+      },
+  
+        
+      "EFSMountTarget2": {
+        "Type": "AWS::EFS::MountTarget",
+        "Properties": {
+          "FileSystemId": {
+            "Ref": "EFSFileSystem"
+          },
+          "SecurityGroups": [
+            {
+              "Ref": "EFSMountTargetSecurityGroup"
+            }
+          ],
+          "SubnetId": {
+            "Ref": "SubnetPublic2"
+          }
+        }
+      }
+  
+    }
+  
+  }

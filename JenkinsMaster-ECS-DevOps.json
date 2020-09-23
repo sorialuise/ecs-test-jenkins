@@ -1,0 +1,680 @@
+{
+    "AWSTemplateFormatVersion": "2010-09-09",
+    "Description": "Creates a VPC containing an ECS cluster and Jenkins ECS service (and proxy to view Jenkins externally)",
+    
+    "Parameters": {
+
+      "EFSFileSystem": {
+        "Description": "EFS File System",
+        "Type": "String",
+        "Default": "fs-85659a06"     
+      },
+  
+      "ECSInstanceRole": {
+        "Description": "ECS Service Roles",
+        "Type": "String",
+        "Default": "JenkinsMasterECSInstanceRole"     
+      },
+     
+      "ECSServiceRole": {
+        "Description": "ECS Service Roles",
+        "Type": "String",
+        "Default": "JenkinsMaster-ECSServiceRole"
+       
+      },
+     
+      "ECSClusterSecurityGroup": {
+        "Description": "Jenkins Security Group",
+        "Type": "AWS::EC2::SecurityGroup::Id",
+        "Default": "sg-064183583a372b0a8"
+
+      },
+
+      "ECSContainerInstancesSecurityGroup": {
+        "Description": "Jenkins Security Group",
+        "Type": "AWS::EC2::SecurityGroup::Id",
+        "Default": "sg-065e70b2cda892531"
+
+      },
+     
+     
+      "ProxyELBSecurityGroup": {
+        "Description": "Jenkins Security Group",
+        "Type": "AWS::EC2::SecurityGroup::Id",
+        "Default": "sg-06daace0b9224dc37"
+
+      },
+     
+      "VPC": {
+        "Type": "AWS::EC2::VPC::Id",
+        "Description": "VPC ust be available in your account",
+        "Default": "vpc-dfde08a5"
+      },
+     
+      "SubnetPublic1": {
+        "Type": "AWS::EC2::Subnet::Id",
+        "Description": "SubnetPublic #1 - must be available in your account and in the same region as SubnetPublic1",
+        "Default": "subnet-cf5cdb93"
+      },
+      
+      "SubnetPublic2": {
+        "Type": "AWS::EC2::Subnet::Id",
+        "Description": "Subnet Public #2 - must be available in your account and in the same region as SubnetPublic2",
+        "Default": "subnet-7041c05e"
+      },
+      
+      "AvailabilityZone1": {
+        "Type": "AWS::EC2::AvailabilityZone::Name",
+        "Description": "Availability Zone #1 - must be available in your account and in the same region as AvailabilityZone1",
+        "Default": "us-east-1d"
+
+      },
+      
+      "AvailabilityZone2": {
+        "Type": "AWS::EC2::AvailabilityZone::Name",
+        "Description": "Availability Zone #2 - must be available in your account and in the same region as AvailabilityZone2",
+        "Default": "us-east-1b"
+      },
+     
+      "InstanceType": {
+        "Type": "String",
+        "Description": "EC2 instance type",
+        "Default": "t2.micro",
+        "AllowedValues": [
+          "t2.micro",
+          "t2.small",
+          "t2.medium",
+          "t2.large",        
+          "m4.large",
+          "m4.xlarge",
+          "m4.2xlarge",
+          "m4.4xlarge",
+          "m4.10xlarge"
+        ],
+        "ConstraintDescription": "must be a general purpose (T2,T3,T3A or M4) EC2 instance type, equal to or larger than a \"t2.small\"."
+      },
+      
+      "KeyPair": {
+        "Type": "AWS::EC2::KeyPair::KeyName",
+        "Description": "Key pair to log into EC2 instances",
+        "Default": "Jenkins-Master-Test"
+
+        
+      },
+      
+      "PublicAccessCIDR": {
+        "Type": "String",
+        "Description": "CIDR block that will have access to AWS resources. Use http://checkip.amazonaws.com/ to get your current IP Address.",
+        "AllowedPattern": "\\d+\\.\\d+\\.\\d+\\.\\d+/\\d+",
+        "Default": "190.102.159.197/32"
+      }
+    },
+  
+    "Mappings": {
+      "RegionAmazonECSOptimizedAMIMapping": {
+        "us-east-1": {
+          "AMI": "ami-08087103f9850bddd"
+          
+        },
+        "us-west-1": {
+          "AMI": "ami-efa1e28f"
+        },
+        "us-west-2": {
+          "AMI": "ami-a426edc4"
+        },
+        "eu-west-1": {
+          "AMI": "ami-7b244e08"
+        },
+        "eu-central-1": {
+          "AMI": "ami-721aec1d"
+        },
+        "ap-northeast-1": {
+          "AMI": "ami-058a4964"
+        },
+        "ap-southeast-1": {
+          "AMI": "ami-f0d9f466e"
+        },
+        "ap-southeast-2": {
+          "AMI": "ami-7df2c61e"
+        }
+      }
+    },
+   
+    "Resources": {   
+      
+      "ECSAutoScalingGroup": {
+        "CreationPolicy": {
+          "ResourceSignal": {
+            "Timeout": "PT5M"
+          }
+        },
+        "Properties": {
+          "DesiredCapacity": 1,
+          "LaunchConfigurationName": {
+            "Ref": "ECSLaunchConfig"
+          },
+          "MaxSize": 2,
+          "MinSize": 1,
+          "TerminationPolicies" : ["NewestInstance"],
+          "VPCZoneIdentifier": [
+            {
+              "Ref": "SubnetPublic1"
+            },
+            {
+              "Ref": "SubnetPublic2"
+            }
+          ],
+          "Tags": [
+            {
+              "Key": "Name",
+              "Value": {
+                "Ref": "AWS::StackName"
+              },
+              "PropagateAtLaunch": true
+            }
+          ]
+        },
+        "UpdatePolicy": {
+          "AutoScalingRollingUpdate": {
+            "MaxBatchSize": "1",
+            "MinInstancesInService": "1",
+            "PauseTime": "PT5M",
+            "WaitOnResourceSignals": "true"
+          }
+        },
+        "Type": "AWS::AutoScaling::AutoScalingGroup"
+      },
+      
+      "ECSLaunchConfig": {
+        "Properties": {
+          "AssociatePublicIpAddress": true,
+          "IamInstanceProfile": {
+            "Ref": "ECSInstanceProfile"
+          },
+          "ImageId": {
+            "Fn::FindInMap": [
+              "RegionAmazonECSOptimizedAMIMapping",
+              {
+                "Ref": "AWS::Region"
+              },
+              "AMI"
+            ]
+          },
+          "InstanceType": {
+            "Ref": "InstanceType"
+          },
+          "KeyName": {
+            "Ref": "KeyPair"
+          },
+          "SecurityGroups": [
+            {
+              "Ref": "ECSClusterSecurityGroup"
+            },
+            {
+              "Ref": "ECSContainerInstancesSecurityGroup"
+            }
+          ],
+          "UserData": {
+            "Fn::Base64": {
+              "Fn::Join": [
+                "",
+                [
+                  "#!/bin/bash\n",
+                  "set -ex\n",
+                  "yum install -y aws-cfn-bootstrap\n",
+                  "yum install -y htop\n",
+                  "yum install -y stress\n",
+                  "/opt/aws/bin/cfn-init -v ",               
+                  "  --stack ",
+                  {
+                    "Ref": "AWS::StackName"
+                  },
+                  "  --resource ECSLaunchConfig",
+                  "  --region ",
+                  {
+                    "Ref": "AWS::Region"
+                  },
+                  "\n",
+                  "echo ECS_CLUSTER=",
+                  {
+                    "Ref": "ECSCluster"
+                  },
+                  " >> /etc/ecs/ecs.config\n",
+                  "mkdir -p /mnt/efs\n",
+                  "aws_az=\"$(curl -s http://169.254.169.254/latest/meta-data/placement/availability-zone)\"\n",
+                  "aws_region=\"${aws_az:0:${#aws_az}-1}\"\n",
+                  "echo \"${aws_az}.",
+                  {
+                    "Ref": "EFSFileSystem"
+                  },
+                  ".efs.${aws_region}.amazonaws.com:/    /mnt/efs   nfs4    defaults\" >> /etc/fstab\n",
+                  "mount -a\n",
+                  "chmod -R 777 /mnt/efs\n",
+                  "service docker restart\n",
+                  "start ecs\n",
+                  "/opt/aws/bin/cfn-signal -e $? ",
+                  "  --stack ",
+                  {
+                    "Ref": "AWS::StackName"
+                  },
+                  "  --resource ECSAutoScalingGroup",
+                  "  --region ",
+                  {
+                    "Ref": "AWS::Region"
+                  },
+                  "\n"
+                ]
+              ]
+            }
+          }
+        },
+        "Metadata": {
+          "AWS::CloudFormation::Init": {
+            "config": {
+              "files": {
+                "/etc/nginx/nginx.conf": {
+                  "content": {
+                    "Fn::Join": [
+                      "",
+                      [
+                        "events {\n",
+                        "  worker_connections 1024;\n",
+                        "}\n",
+                        "http {\n",
+                        "  server {\n",
+                        "    location / {\n",
+                        "      proxy_pass http://",
+                        {
+                          "Fn::GetAtt": [
+                            "JenkinsLoadBalancer",
+                            "DNSName"
+                          ]
+                        },
+                        ";\n",
+                        "      proxy_read_timeout 90;\n",
+                        "      proxy_redirect default;\n",
+                        "      proxy_set_header Host $host:$server_port;\n",
+                        "      proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;\n",
+                        "      proxy_set_header X-Real-IP $remote_addr;\n",
+                        "    }\n",
+                        "  }\n",
+                        "}\n"
+                      ]
+                    ]
+                  },
+                  "mode": "000644",
+                  "owner": "root",
+                  "group": "root"
+                }
+              },
+              "packages": {
+                "yum": {
+                  "nfs-utils": [
+  
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "Type": "AWS::AutoScaling::LaunchConfiguration"
+      },
+    
+      "ScaleUpPolicy" : {
+        "Type" : "AWS::AutoScaling::ScalingPolicy",
+        "Properties" : {
+           "AdjustmentType" : "ChangeInCapacity",
+           "AutoScalingGroupName" : { "Ref" : "ECSAutoScalingGroup" },
+           "Cooldown" : "30",
+           "ScalingAdjustment" : "1"
+        }
+     },
+
+     "CPUAlarmHigh": {
+      "Type": "AWS::CloudWatch::Alarm",
+      "Properties": {
+         "EvaluationPeriods": "1",
+         "Statistic": "Average",
+         "Threshold": "70",
+         "AlarmDescription": "Alarm if CPU too high or metric disappears indicating instance is down",
+         "Period": "60",
+         "AlarmActions": [ { "Ref": "ScaleUpPolicy" },{ "Ref": "ServiceScalingPolicy"} ],
+         "Namespace": "AWS/EC2",
+         "Dimensions": [ {
+            "Name": "AutoScalingGroupName",
+            "Value": { "Ref": "ECSAutoScalingGroup" }
+         } ],
+         "ComparisonOperator": "GreaterThanOrEqualToThreshold",
+         "MetricName": "CPUUtilization"
+      }
+   },
+
+
+      "ScaleDownPolicy" : {
+        "Type" : "AWS::AutoScaling::ScalingPolicy",
+        "Properties" : {
+          "AdjustmentType" : "ChangeInCapacity",
+          "AutoScalingGroupName" : { "Ref" : "ECSAutoScalingGroup" },
+          "Cooldown" : "30",
+          "ScalingAdjustment" : "-1"
+        }
+    },
+
+    "CPUAlarmDown": {
+      "Type": "AWS::CloudWatch::Alarm",
+      "Properties": {
+        "EvaluationPeriods": "3",
+        "Statistic": "Average",
+        "Threshold": "1.5",
+        "AlarmDescription": "Alarm if CPU too Down or metric disappears indicating instance is down",
+        "Period": "60",
+        "AlarmActions": [ { "Ref": "ScaleDownPolicy" } ],
+        "Namespace": "AWS/EC2",
+        "Dimensions": [ {
+            "Name": "AutoScalingGroupName",
+            "Value": { "Ref": "ECSAutoScalingGroup" }
+        } ],
+        "ComparisonOperator": "LessThanOrEqualToThreshold",
+        "MetricName": "CPUUtilization"
+      }
+    },
+
+
+          
+
+    "JenkinsECSServiceScalingTarget":{
+      "Type":"AWS::ApplicationAutoScaling::ScalableTarget",
+      "DependsOn": ["JenkinsECSService" , "ASGECSServiceRole"],
+      "Properties":{
+        "MaxCapacity":20,
+        "MinCapacity":1,
+        "ResourceId":{
+          "Fn::Join":[
+            "",
+            [
+              "service/",
+              {
+                "Ref":"ECSCluster"
+              },
+              "/",
+              {
+                "Fn::GetAtt":[
+                  "JenkinsECSService",
+                  "Name"
+                ]
+              }
+            ]
+          ]
+        },
+        "RoleARN":{
+          "Fn::GetAtt":[
+            "ASGECSServiceRole",
+            "Arn"
+          ]
+        },
+        "ScalableDimension":"ecs:service:DesiredCount",
+        "ServiceNamespace":"ecs"
+      }
+    },
+
+    "ServiceScalingPolicy":{
+      "Type":"AWS::ApplicationAutoScaling::ScalingPolicy",
+      "Properties":{
+        "PolicyName":"ecs-service-auto-scaling-policy",
+        "PolicyType":"StepScaling",
+        "ScalingTargetId":{
+          "Ref":"JenkinsECSServiceScalingTarget"
+        },
+        "StepScalingPolicyConfiguration":{
+          "AdjustmentType":"PercentChangeInCapacity",
+          "Cooldown":30,
+          "MetricAggregationType":"Average",
+          "StepAdjustments":[
+            {
+              "MetricIntervalLowerBound":0,
+              "ScalingAdjustment":200
+            }
+          ]
+        }
+      }
+    },
+
+    "ASGECSServiceRole":{
+      "Type":"AWS::IAM::Role",
+      "Properties":{
+        "AssumeRolePolicyDocument":{
+          "Statement":[
+            {
+              "Effect":"Allow",
+              "Principal":{
+                "Service":[
+                  "application-autoscaling.amazonaws.com"
+                ]
+              },
+              "Action":[
+                "sts:AssumeRole"
+              ]
+            }
+          ]
+        },
+        "Path":"/",
+        "Policies":[
+          {
+            "PolicyName":"ecs-service-autoscaling",
+            "PolicyDocument":{
+              "Statement":[
+                {
+                  "Effect":"Allow",
+                  "Action":[
+                    "application-autoscaling:*",
+                    "cloudwatch:DescribeAlarms",
+                    "cloudwatch:PutMetricAlarm",
+                    "ecs:DescribeServices",
+                    "ecs:UpdateService"
+                  ],
+                  "Resource":"*"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+
+
+      "ECSCluster": {
+        "Type": "AWS::ECS::Cluster"
+      },    
+      
+      "ECSInstanceProfile": {
+        "Properties": {
+          "Path": "/",
+          "Roles": [
+            {
+              "Ref": "ECSInstanceRole"
+            }
+          ]
+        },
+        "Type": "AWS::IAM::InstanceProfile"
+      }, 
+
+
+      "JenkinsLoadBalancer":{
+        "Type" : "AWS::ElasticLoadBalancingV2::LoadBalancer",
+        "Properties" : {
+            "IpAddressType" : "ipv4",
+            "LoadBalancerAttributes" : 
+              [ 
+                { "Key": "idle_timeout.timeout_seconds", 
+                  "Value": "60"
+                }
+              ],
+            "Name" : {
+              "Fn::Join":[
+                "-",
+                [
+                  "alb", "jenkins-service" , "ecs"
+                ]
+              ]
+            },
+            "Scheme" : "internet-facing",
+            "SecurityGroups" : [ {"Ref": "ECSClusterSecurityGroup"} ],
+            "Subnets" : [ {"Ref": "SubnetPublic1"}, {"Ref": "SubnetPublic2"} ]
+            
+          }
+      },
+
+      "JenkinsALBListener": {
+        "Type": "AWS::ElasticLoadBalancingV2::Listener",
+        "Properties": {
+          "DefaultActions": [{
+            "Type": "forward",
+            "TargetGroupArn": { "Ref": "TargetJenkins" }
+          }],
+          "LoadBalancerArn": { "Ref": "JenkinsLoadBalancer" },
+          "Port": "80",
+          "Protocol": "HTTP"
+          
+        }
+      },
+
+      "TargetJenkins": {
+        "Type" : "AWS::ElasticLoadBalancingV2::TargetGroup",
+        "Properties" : {
+          "HealthCheckIntervalSeconds" : "30",
+          "HealthCheckPath" : "/login",
+          "HealthCheckPort" : "8080",
+          "HealthCheckProtocol" : "HTTP",
+          "HealthCheckTimeoutSeconds" : "5",
+          "HealthyThresholdCount" : 2,
+          "Matcher" : {"HttpCode": "200"},
+          "Name" : {"Fn::Join":["-",["tg", {"Ref": "AWS::StackName"}, "ecs"]]},
+          "Port" : "8080",
+          "Protocol" : "HTTP",
+          "TargetType" : "instance",
+          "UnhealthyThresholdCount" : "5",
+          "VpcId" : { "Ref": "VPC" }
+        }
+      },
+
+     
+      "JenkinsECSService": {
+        "DependsOn": ["JenkinsALBListener"],
+        "Properties": {
+          "Cluster": {
+            "Ref": "ECSCluster"
+          },
+          "DesiredCount": 1,
+          "LoadBalancers": [
+            {
+              "ContainerName": "jenkins",
+              "ContainerPort": "8080",
+              "TargetGroupArn": {
+                "Ref": "TargetJenkins"
+              }
+            }
+          ],
+          "Role": {
+            "Ref": "ECSServiceRole"
+          },
+          "TaskDefinition": {
+            "Ref": "JenkinsTaskDefinition"
+          }
+        },
+        "Type": "AWS::ECS::Service"
+      },
+
+      
+      "JenkinsTaskDefinition": {
+        "Properties": {
+          "ContainerDefinitions": [
+            {
+              "Name": "jenkins",
+              /*"Image": "lsoriab/jenkins-stress:v1",*/
+              "Image": "731451121490.dkr.ecr.us-east-1.amazonaws.com/img-jenkins-stress:latest",
+              "Hostname": "jenkins",
+              "Cpu": 512,
+              "Memory": 512,
+              "Environment": [
+                {
+                  "Name": "JAVA_OPTS",
+                  "Value": "-Djenkins.install.runSetupWizard=false"
+                }
+              ],
+              "Essential": true,
+              "MountPoints": [
+                {
+                  "ContainerPath": "/var/jenkins_home",
+                  "SourceVolume": "efs-jenkins"
+                }
+              ],
+              "PortMappings": [
+                {
+                  "HostPort": 8080,
+                  "ContainerPort": 8080
+                },
+                {
+                  "HostPort": 50000,
+                  "ContainerPort": 50000
+                }
+              ]
+            }
+          ],
+          "Volumes": [
+            {
+              "Name": "efs-jenkins",
+              "Host": {
+                "SourcePath": "/mnt/efs"
+              }
+            }
+          ]
+        },
+        "Type": "AWS::ECS::TaskDefinition"
+      }
+    
+    },
+
+      
+    "Outputs": {
+      "JenkinsConfigurationAlternativeJenkinsURL": {
+        "Description": "Jenkins configuration: \"Alternative Jenkins URL\"",
+        "Value": {
+          "Fn::Join": [
+            "",
+            [
+              "http://",
+              {
+                "Fn::GetAtt": [
+                  "JenkinsLoadBalancer",
+                  "DNSName"
+                ]
+              },
+              "/"
+            ]
+          ]
+        }
+      },
+      "JenkinsConfigurationECSCluster": {
+        "Description": "Jenkins configuration: \"ECS Cluster\"",
+        "Value": {
+          "Fn::Join": [
+            "",
+            [
+              "arn:aws:ecs:",
+              {
+                "Ref": "AWS::Region"
+              },
+              ":",
+              {
+                "Ref": "AWS::AccountId"
+              },
+              ":cluster/",
+              {
+                "Ref": "ECSCluster"
+              }
+            ]
+          ]
+        }
+      }
+    }
+   }
